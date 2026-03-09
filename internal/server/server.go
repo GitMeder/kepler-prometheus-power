@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+	"crypto/subtle"
 
 	"github.com/prometheus/exporter-toolkit/web"
 	"github.com/sustainable-computing-io/kepler/internal/service"
@@ -39,6 +40,26 @@ type Opts struct {
 	logger      *slog.Logger
 	listenAddrs []string
 	webCfgPath  string
+}
+
+const (
+	metricsUser = "vmagent"
+	metricsPass = "supersecret" // TODO: später aus Secret/Env/Flag
+)
+
+func basicAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u, p, ok := r.BasicAuth()
+		if !ok ||
+			subtle.ConstantTimeCompare([]byte(u), []byte(metricsUser)) != 1 ||
+			subtle.ConstantTimeCompare([]byte(p), []byte(metricsPass)) != 1 {
+
+			w.Header().Set("WWW-Authenticate", `Basic realm="kepler"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // OptionFn is a function sets one more more options in Opts struct
@@ -166,6 +187,11 @@ func (s *APIServer) Shutdown() error {
 
 func (s *APIServer) Register(endpoint, summary, description string, handler http.Handler) error {
 	s.logger.Debug("Endpoint Registered", "endpoint", endpoint)
+
+	if endpoint == "/metrics" {
+		handler = basicAuth(handler)
+	}
+
 	s.mux.Handle(endpoint, handler)
 	s.endpointDescription += fmt.Sprintf("<li> <a href=\"%s\"> %s </a> %s </li>\n", endpoint, summary, description)
 	return nil
