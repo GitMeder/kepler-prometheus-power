@@ -8,7 +8,8 @@
 .env
 
 # Ignore bin directory
-bin/
+bin/*
+!bin/kepler-amd64
 
 # Ignore tmp directory
 tmp

@@ -18,7 +18,7 @@ import (
 	"github.com/sustainable-computing-io/kepler/config"
 	"github.com/sustainable-computing-io/kepler/internal/device"
 	"github.com/sustainable-computing-io/kepler/internal/device/gpu"
-	_ "github.com/sustainable-computing-io/kepler/internal/device/gpu/nvidia" // Register NVIDIA backend
+	// _ "github.com/sustainable-computing-io/kepler/internal/device/gpu/nvidia" // Register NVIDIA backend
 	"github.com/sustainable-computing-io/kepler/internal/exporter/prometheus"
 	"github.com/sustainable-computing-io/kepler/internal/exporter/stdout"
 	"github.com/sustainable-computing-io/kepler/internal/k8s/pod"

@@ -1,0 +1,3 @@
+FROM registry.access.redhat.com/ubi9:latest
+COPY bin/kepler-amd64 /usr/bin/kepler
+ENTRYPOINT ["/usr/bin/kepler"]
