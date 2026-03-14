@@ -5,10 +5,13 @@ package device
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -22,14 +25,39 @@ type PrometheusClient struct {
 }
 
 // NewPrometheusClient builds a simple client for issuing power queries.
-func NewPrometheusClient(baseURL, query string) *PrometheusClient {
+func NewPrometheusClient(baseURL, query, caFile string) (*PrometheusClient, error) {
+	httpClient := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	if strings.TrimSpace(caFile) != "" {
+		caPEM, err := os.ReadFile(caFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read prometheus CA file %q: %w", caFile, err)
+		}
+
+		roots, err := x509.SystemCertPool()
+		if err != nil || roots == nil {
+			roots = x509.NewCertPool()
+		}
+
+		if ok := roots.AppendCertsFromPEM(caPEM); !ok {
+			return nil, fmt.Errorf("failed to append CA certificates from %q", caFile)
+		}
+
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = &tls.Config{
+			RootCAs: roots,
+		}
+
+		httpClient.Transport = transport
+	}
+
 	return &PrometheusClient{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		query:   query,
-		client: &http.Client{
-			Timeout: 5 * time.Second,
-		},
-	}
+		client:  httpClient,
+	}, nil
 }
 
 // QueryPowerWatt executes the configured query and returns the watt value.

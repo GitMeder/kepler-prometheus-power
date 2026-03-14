@@ -326,7 +326,10 @@ func createCPUMeter(logger *slog.Logger, cfg *config.Config) (device.CPUPowerMet
 			"query", pp.Query,
 		)
 
-		client := device.NewPrometheusClient(pp.BaseURL, pp.Query)
+		client, err := device.NewPrometheusClient(pp.BaseURL, pp.Query, pp.CAFile)
+		if err != nil {
+			return nil, err
+		}
 		return device.NewPrometheusPowerMeter("node", client.QueryPowerWatt)
 	}
 

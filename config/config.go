@@ -185,6 +185,7 @@ type (
 		Enabled *bool  `yaml:"enabled"`
 		BaseURL string `yaml:"baseURL"`
 		Query   string `yaml:"query"`
+		CAFile string `yaml:"caFile"`
 	}
 
 	// Experimental contains experimental features (no stability guarantees)

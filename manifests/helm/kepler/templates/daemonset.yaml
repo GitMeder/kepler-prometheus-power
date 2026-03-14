@@ -62,6 +62,9 @@ spec:
               containerPort: 28282
               protocol: TCP
           volumeMounts:
+            - name: prompower-ca
+              mountPath: /etc/prompower-ca
+              readOnly: true
             - name: sysfs
               mountPath: /host/sys
               readOnly: true
@@ -98,6 +101,9 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:
+        - name: prompower-ca
+          secret:
+            secretName: vm-ca-cert
         - name: sysfs
           hostPath:
             path: /sys
