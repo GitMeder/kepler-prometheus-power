@@ -26,12 +26,6 @@ service:
 daemonset:
   hostPID: true
   tolerations:
-    - key: node-role.kubernetes.io/control-plane
-      operator: Exists
-      effect: NoSchedule
-    - key: node-role.kubernetes.io/master
-      operator: Exists
-      effect: NoSchedule
   nodeSelector: {}
   affinity: {}
   hostUsers: true
@@ -83,10 +77,11 @@ config:
       zones: []
   experimental:
     prometheus-power:
+      nodeDeviceMapFile: /etc/kepler/node-device-map/node-device-map.yaml
       caFile: /etc/prompower-ca/ca.crt
       enabled: true
       baseURL: https://vmuser:VMInHochschule@192.168.64.1:8428
-      query: device_power_watts_avg{room="R3.033",rack="Rack 3",device="kub01"}
+      query: device_power_watts_avg{room="R3.033",rack="Rack 3",device="${POWER_DEVICE}"}
     platform:
       redfish:
         enabled: false

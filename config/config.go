@@ -186,6 +186,7 @@ type (
 		BaseURL string `yaml:"baseURL"`
 		Query   string `yaml:"query"`
 		CAFile string `yaml:"caFile"`
+		NodeDeviceMapFile string `yaml:"nodeDeviceMapFile"`
 	}
 
 	// Experimental contains experimental features (no stability guarantees)

@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"gopkg.in/yaml.v3"
 	"log/slog"
 	"os"
 	"strings"
@@ -317,16 +318,44 @@ func createCPUMeter(logger *slog.Logger, cfg *config.Config) (device.CPUPowerMet
 	if cfg.Experimental != nil && ptr.Deref(cfg.Experimental.PrometheusPower.Enabled, false) {
 		pp := cfg.Experimental.PrometheusPower
 
-		if strings.TrimSpace(pp.BaseURL) == "" || strings.TrimSpace(pp.Query) == "" {
+		baseURL := strings.TrimSpace(os.ExpandEnv(pp.BaseURL))
+		caFile := strings.TrimSpace(os.ExpandEnv(pp.CAFile))
+		nodeName := strings.TrimSpace(os.Getenv("NODE_NAME"))
+
+		powerDevice := nodeName
+		if strings.TrimSpace(pp.NodeDeviceMapFile) != "" {
+			nodeDeviceMap, err := loadNodeDeviceMap(strings.TrimSpace(os.ExpandEnv(pp.NodeDeviceMapFile)))
+			if err != nil {
+				return nil, err
+			}
+			if mapped, ok := nodeDeviceMap[nodeName]; ok && strings.TrimSpace(mapped) != "" {
+				powerDevice = strings.TrimSpace(mapped)
+			} else {
+				return nil, fmt.Errorf("no power-device mapping found for node %q", nodeName)
+			}
+		}
+
+		query := strings.TrimSpace(os.Expand(pp.Query, func(key string) string {
+			switch key {
+			case "POWER_DEVICE":
+				return powerDevice
+			default:
+				return os.Getenv(key)
+			}
+		}))
+
+		if baseURL == "" || query == "" {
 			return nil, fmt.Errorf("experimental.prometheus-power enabled but baseURL or query is empty")
 		}
 
 		logger.Info("Using Prometheus-based node power input",
-			"baseURL", pp.BaseURL,
-			"query", pp.Query,
+			"baseURL", baseURL,
+			"query", query,
+			"nodeNameEnv", nodeName,
+			"powerDevice", powerDevice,
 		)
 
-		client, err := device.NewPrometheusClient(pp.BaseURL, pp.Query, pp.CAFile)
+		client, err := device.NewPrometheusClient(baseURL, query, caFile)
 		if err != nil {
 			return nil, err
 		}
@@ -378,6 +407,20 @@ func createCPUMeter(logger *slog.Logger, cfg *config.Config) (device.CPUPowerMet
 		device.WithRaplLogger(logger),
 		device.WithZoneFilter(cfg.Rapl.Zones),
 	)
+}
+
+func loadNodeDeviceMap(path string) (map[string]string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read node-device map file %q: %w", path, err)
+	}
+
+	var nodeDeviceMap map[string]string
+	if err := yaml.Unmarshal(content, &nodeDeviceMap); err != nil {
+		return nil, fmt.Errorf("failed to parse node-device map file %q: %w", path, err)
+	}
+
+	return nodeDeviceMap, nil
 }
 
 // createGPUMeters discovers and initializes GPU power meters for all vendors.

@@ -62,6 +62,9 @@ spec:
               containerPort: 28282
               protocol: TCP
           volumeMounts:
+            - name: node-device-map
+              mountPath: /etc/kepler/node-device-map
+              readOnly: true
             - name: prompower-ca
               mountPath: /etc/prompower-ca
               readOnly: true
@@ -101,6 +104,9 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:
+        - name: node-device-map
+          configMap:
+            name: kepler-node-device-map
         - name: prompower-ca
           secret:
             secretName: vm-ca-cert
