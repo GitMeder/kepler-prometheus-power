@@ -19,13 +19,15 @@ import (
 
 // PrometheusClient executes instant queries against Prometheus-compatible APIs.
 type PrometheusClient struct {
-	baseURL string
-	query   string
-	client  *http.Client
+	baseURL  string
+	query    string
+	username string
+	password string
+	client   *http.Client
 }
 
 // NewPrometheusClient builds a simple client for issuing power queries.
-func NewPrometheusClient(baseURL, query, caFile string) (*PrometheusClient, error) {
+func NewPrometheusClient(baseURL, query, caFile, username, passwordFile string) (*PrometheusClient, error) {
 	httpClient := &http.Client{
 		Timeout: 5 * time.Second,
 	}
@@ -53,10 +55,21 @@ func NewPrometheusClient(baseURL, query, caFile string) (*PrometheusClient, erro
 		httpClient.Transport = transport
 	}
 
+	password := ""
+	if strings.TrimSpace(passwordFile) != "" {
+		raw, err := os.ReadFile(passwordFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read prometheus password file %q: %w", passwordFile, err)
+		}
+		password = strings.TrimSpace(string(raw))
+	}
+
 	return &PrometheusClient{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		query:   query,
-		client:  httpClient,
+		baseURL:  strings.TrimRight(baseURL, "/"),
+		query:    query,
+		username: strings.TrimSpace(username),
+		password: password,
+		client:   httpClient,
 	}, nil
 }
 
@@ -72,6 +85,10 @@ func (c *PrometheusClient) QueryPowerWatt(ctx context.Context) (float64, error) 
 	u.RawQuery = q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if c.username != "" && c.password != "" {
+		req.SetBasicAuth(c.username, c.password)
+	}
+
 	if err != nil {
 		return 0, fmt.Errorf("failed to build prometheus query request: %w", err)
 	}

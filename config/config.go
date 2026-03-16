@@ -182,10 +182,12 @@ type (
 	}
 
 	PrometheusPower struct {
-		Enabled *bool  `yaml:"enabled"`
-		BaseURL string `yaml:"baseURL"`
-		Query   string `yaml:"query"`
-		CAFile string `yaml:"caFile"`
+		Enabled           *bool  `yaml:"enabled"`
+		BaseURL           string `yaml:"baseURL"`
+		Query             string `yaml:"query"`
+		CAFile            string `yaml:"caFile"`
+		Username          string `yaml:"username"`
+		PasswordFile      string `yaml:"passwordFile"`
 		NodeDeviceMapFile string `yaml:"nodeDeviceMapFile"`
 	}
 

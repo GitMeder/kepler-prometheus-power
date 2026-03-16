@@ -355,7 +355,10 @@ func createCPUMeter(logger *slog.Logger, cfg *config.Config) (device.CPUPowerMet
 			"powerDevice", powerDevice,
 		)
 
-		client, err := device.NewPrometheusClient(baseURL, query, caFile)
+		username := strings.TrimSpace(pp.Username)
+		passwordFile := strings.TrimSpace(pp.PasswordFile)
+
+		client, err := device.NewPrometheusClient(baseURL, query, caFile, username, passwordFile)
 		if err != nil {
 			return nil, err
 		}

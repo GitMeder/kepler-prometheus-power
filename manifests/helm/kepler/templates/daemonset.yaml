@@ -68,6 +68,11 @@ spec:
             - name: prompower-ca
               mountPath: /etc/prompower-ca
               readOnly: true
+              {{- if .Values.prompowerAuth.secretName }}
+            - name: prompower-auth
+              mountPath: {{ .Values.prompowerAuth.mountPath }}
+              readOnly: true
+              {{- end }}
             - name: sysfs
               mountPath: /host/sys
               readOnly: true
@@ -103,6 +108,39 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- if .Values.vmagent.enabled }}
+        - name: vmagent
+          image: "{{ .Values.vmagent.image.repository }}:{{ .Values.vmagent.image.tag }}"
+          imagePullPolicy: {{ .Values.vmagent.image.pullPolicy }}
+          args:
+            - -promscrape.config=/etc/vmagent/vmagent-scrape.yaml
+            - -remoteWrite.url={{ .Values.vmagent.remoteWrite.url }}
+            - -remoteWrite.basicAuth.username={{ .Values.vmagent.remoteWrite.username }}
+            - -remoteWrite.basicAuth.passwordFile=/etc/vmagent-remote-write/password
+            - -remoteWrite.tlsCAFile={{ .Values.vmagent.remoteWrite.caFile }}
+          volumeMounts:
+            - name: cfm
+              mountPath: /etc/vmagent
+              readOnly: true
+            - name: vm-remote-write-auth
+              mountPath: /etc/vmagent-remote-write
+              readOnly: true
+            - name: prompower-ca
+              mountPath: /etc/prompower-ca
+              readOnly: true
+          {{- with .Values.vmagent.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.vmagent.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.vmagent.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- end }}
       volumes:
         - name: node-device-map
           configMap:
@@ -119,3 +157,13 @@ spec:
         - name: cfm
           configMap:
             name: {{ include "kepler.fullname" . }}
+          {{- if .Values.vmagent.enabled }}
+        - name: vm-remote-write-auth
+          secret:
+            secretName: {{ .Values.vmagent.remoteWrite.passwordSecretName }}
+          {{- end }}
+          {{- if .Values.prompowerAuth.secretName }}
+        - name: prompower-auth
+          secret:
+            secretName: {{ .Values.prompowerAuth.secretName }}
+          {{- end }}

@@ -12,3 +12,15 @@ metadata:
 data:
   config.yaml: |
     {{- toYaml .Values.config | nindent 4}}
+{{- if .Values.vmagent.enabled }}
+  vmagent-scrape.yaml: |
+    global:
+      scrape_interval: {{ .Values.vmagent.scrape.interval | quote }}
+    scrape_configs:
+      - job_name: "kepler-local"
+        metrics_path: {{ .Values.vmagent.scrape.path | quote }}
+        scheme: {{ .Values.vmagent.scrape.scheme | quote }}
+        static_configs:
+          - targets:
+              - {{ .Values.vmagent.scrape.target | quote }}
+{{- end }}
