@@ -109,7 +109,142 @@ kubectl kustomize manifests/k8s | \
   kubectl apply --server-side --force-conflicts -f -
 ```
 
-## 📖 Documentation
+## Production Deployment with External Power Input
+
+Kepler supports production deployments where node power input is sourced from an external Prometheus or VictoriaMetrics target, instead of relying solely on local RAPL-based node power readings. This is useful when you have a high-precision central power meter feeding device power metrics.
+
+### Architecture Overview
+
+- Kepler runs as a DaemonSet on Kubernetes worker nodes.
+- An external Prometheus/VictoriaMetrics endpoint provides node/device power input.
+- Node-to-device mapping is provided via a dedicated ConfigMap.
+- A `vmagent` sidecar scrapes local Kepler metrics and forwards them by `remote_write` to the central monitoring backend.
+- Central endpoint is secured with HTTPS + Basic Auth.
+
+### External Power Query
+
+The external power source uses a query template like:
+
+```yaml
+query: device_power_watts_avg{room="R3.033",rack="Rack 3",device="${POWER_DEVICE}"}
+```
+
+### Required Kubernetes Objects
+
+In this production pattern, ensure the following objects are present:
+
+- Registry Pull Secret for private image registry access.
+- CA Secret for TLS trust of the central monitoring VM endpoint.
+- Secret for Kepler external power query authentication.
+- Secret for vmagent `remote_write` authentication.
+- ConfigMap for node-to-device mapping.
+
+### Example Node-to-Device ConfigMap
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kepler-node-device-map
+  namespace: kepler
+data:
+  worker-node-01: kub01
+  worker-node-02: kub02
+  worker-node-03: kub03
+```
+
+### Helm Values for Production
+
+```yaml
+image:
+  repository: quay.io/sustainable_computing_io/kepler
+  tag: v0.10.0
+
+config:
+  experimental:
+    prometheus-power:
+      enabled: true
+  baseURL: "https://central-vm.example.com"
+  username: "kepler-user"
+  passwordFile: "/etc/kepler/secrets/kepler-password"
+  caFile: "/etc/kepler/secrets/ca.crt"
+  nodeDeviceMapFile: "/etc/kepler/config/node-device-map.yaml"
+  query: "device_power_watts_avg{room=\"R3.033\",rack=\"Rack 3\",device=\"${POWER_DEVICE}\"}"
+
+vmagent:
+  enabled: true
+  scrape:
+    target:
+      path: /metrics
+      scheme: https
+  remoteWrite:
+    url: "https://central-vm.example.com/api/v1/write"
+    username: "vmagent-user"
+    passwordSecretName: vmagent-remote-write-secret
+    passwordSecretKey: password
+    caFile: "/etc/kepler/secrets/ca.crt"
+```
+
+### Worker-Only Scheduling
+
+For production, schedule Kepler only on worker nodes (not control-plane nodes) by using nodeAffinity/tolerations in the DaemonSet. This avoids interference with control-plane components and keeps resource usage predictable.
+
+### Production Rollout Checklist
+
+- [x] image built and pushed to registry
+- [x] production values file selected and applied
+- [x] monitoring endpoint reachable from cluster
+- [x] HTTPS and Basic Auth working for central endpoint
+- [x] secrets and ConfigMap present in namespace
+- [x] node-to-device mapping uses real production node names
+- [x] worker-only scheduling configured for DaemonSet
+- [x] vmagent `remote_write` forwarding verified
+
+### Smoke Test After Rollout
+
+1. Verify DaemonSet and pods:
+
+```bash
+kubectl get daemonset kepler -n kepler
+kubectl get pods -n kepler
+```
+
+2. Port-forward a Kepler pod and test metrics endpoint:
+
+```bash
+kubectl port-forward -n kepler svc/kepler 28282:28282
+curl http://localhost:28282/metrics | grep kepler_node_cpu_watts
+```
+
+3. Query central VictoriaMetrics for forwarded metrics:
+
+```bash
+curl -G "https://central-vm.example.com/api/v1/query" --data-urlencode 'query=sum by (node_name)(kepler_node_cpu_watts)' --user "vmagent-user:yourpassword" --cacert /path/to/ca.crt
+```
+
+### Notes for Cluster Migration
+
+When migrating this setup to a different cluster you typically need to adjust:
+
+- image registry and tag
+- central monitoring endpoint hostname
+- CA certificate secret
+- auth secrets
+- node-to-device mapping ConfigMap
+- scheduling constraints (node selectors/taints)
+- dashboards and queries with environment-specific labels
+
+Portable example queries:
+
+```promql
+sum(kepler_node_cpu_watts)
+```
+
+```promql
+topk(10, sum by (node_name, comm, pid) (kepler_process_cpu_watts))
+```
+
+## �📖 Documentation
 
 ### User Documentation
 
