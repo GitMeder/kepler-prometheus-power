@@ -62,9 +62,11 @@ spec:
               containerPort: 28282
               protocol: TCP
           volumeMounts:
+              {{- if (index .Values.config.experimental "prometheus-power").nodeDeviceMapFile }}
             - name: node-device-map
               mountPath: /etc/kepler/node-device-map
               readOnly: true
+              {{- end }}
             - name: prompower-ca
               mountPath: /etc/prompower-ca
               readOnly: true
@@ -142,9 +144,11 @@ spec:
           {{- end }}
           {{- end }}
       volumes:
+          {{- if (index .Values.config.experimental "prometheus-power").nodeDeviceMapFile }}
         - name: node-device-map
           configMap:
             name: kepler-node-device-map
+          {{- end }}
         - name: prompower-ca
           secret:
             secretName: vm-ca-cert
