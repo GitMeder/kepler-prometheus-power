@@ -113,11 +113,16 @@ kubectl kustomize manifests/k8s | \
 
 Kepler supports production deployments where node power input is sourced from an external Prometheus or VictoriaMetrics target, instead of relying solely on local RAPL-based node power readings. This is useful when you have a high-precision central power meter feeding device power metrics.
 
+### External Power Input Modes
+
+- Direct mode: `POWER_DEVICE` resolves to the Kubernetes node name (`NODE_NAME`) by default.
+- Optional mapping mode: if `nodeDeviceMapFile` is configured and non-empty, Kepler loads a node-to-device mapping from that file.
+
 ### Architecture Overview
 
 - Kepler runs as a DaemonSet on Kubernetes worker nodes.
 - An external Prometheus/VictoriaMetrics endpoint provides node/device power input.
-- Node-to-device mapping is provided via a dedicated ConfigMap.
+- Node-to-device mapping is optional and only required when node names differ from external `device` label values.
 - A `vmagent` sidecar scrapes local Kepler metrics and forwards them by `remote_write` to the central monitoring backend.
 - Central endpoint is secured with HTTPS + Basic Auth.
 
@@ -137,9 +142,9 @@ In this production pattern, ensure the following objects are present:
 - CA Secret for TLS trust of the central monitoring VM endpoint.
 - Secret for Kepler external power query authentication.
 - Secret for vmagent `remote_write` authentication.
-- ConfigMap for node-to-device mapping.
+- Optional ConfigMap for node-to-device mapping, only required if node names do not match external device labels.
 
-### Example Node-to-Device ConfigMap
+### Example Node-to-Device ConfigMap (Optional Fallback Mode)
 
 ```yaml
 apiVersion: v1
@@ -164,12 +169,15 @@ config:
   experimental:
     prometheus-power:
       enabled: true
-  baseURL: "https://central-vm.example.com"
-  username: "kepler-user"
-  passwordFile: "/etc/kepler/secrets/kepler-password"
-  caFile: "/etc/kepler/secrets/ca.crt"
-  nodeDeviceMapFile: "/etc/kepler/config/node-device-map.yaml"
-  query: "device_power_watts_avg{room=\"R3.033\",rack=\"Rack 3\",device=\"${POWER_DEVICE}\"}"
+      baseURL: "https://central-vm.example.com"
+      username: "kepler-user"
+      passwordFile: "/etc/kepler/secrets/kepler-password"
+      caFile: "/etc/kepler/secrets/ca.crt"
+      # direct mode (default)
+      nodeDeviceMapFile: ""
+      query: "device_power_watts_avg{room=\"R3.033\",rack=\"Rack 3\",device=\"${POWER_DEVICE}\"}"
+      # optional mapping mode
+      # nodeDeviceMapFile: "/etc/kepler/config/node-device-map.yaml"
 
 vmagent:
   enabled: true
@@ -196,7 +204,7 @@ For production, schedule Kepler only on worker nodes (not control-plane nodes) b
 - [x] monitoring endpoint reachable from cluster
 - [x] HTTPS and Basic Auth working for central endpoint
 - [x] secrets and ConfigMap present in namespace
-- [x] node-to-device mapping uses real production node names
+- [x] production node names match external device labels OR optional node-to-device mapping is configured
 - [x] worker-only scheduling configured for DaemonSet
 - [x] vmagent `remote_write` forwarding verified
 
