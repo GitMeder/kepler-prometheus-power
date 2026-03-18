@@ -58,26 +58,28 @@ accurate energy consumption monitoring for cloud-native workloads.
 
 ### ⚡ Quick Start (Kubernetes with Helm)
 
+This quick start shows the production deployment path for this custom fork (not the generic upstream OCI chart).
+
 ```sh
-# 1. Install Kepler using Helm from OCI registry
-helm install kepler oci://quay.io/sustainable_computing_io/charts/kepler \
-  --namespace kepler \
-  --create-namespace
+# 1. Deploy or upgrade Kepler from local fork chart with production values
+helm upgrade --install kepler manifests/helm/kepler \
+  -f manifests/helm/kepler/values-prompower-prod.yaml \
+  --namespace default
 
 # Wait for Kepler pods to be running
-kubectl wait --for=condition=ready --timeout=120s pod -n kepler --all
+kubectl wait --for=condition=ready --timeout=120s pod -n default -l app.kubernetes.io/name=kepler --all
 
 # 2. Verify installation
-kubectl get pods -n kepler
+kubectl get pods -n default -l app.kubernetes.io/name=kepler
 
 # 3. Access metrics (port-forward)
-kubectl port-forward -n kepler svc/kepler 28282:28282
+kubectl port-forward -n default svc/kepler 28282:28282
 
 # Test metrics endpoint
 curl http://localhost:28282/metrics | grep kepler_node_cpu_watts
 ```
 
-> **📋 For Production Deployments:** Consider using the [Kepler Operator](https://github.com/sustainable-computing-io/kepler-operator#-getting-started) for advanced lifecycle management and operational capabilities.
+> **📋 For Production Deployments:** This fork uses a custom local chart and fork image. See the production deployment section for concrete values and secret names.
 
 **Next Steps:**
 
@@ -92,9 +94,9 @@ To ensure Kepler is working correctly and to visualize the metrics:
 - [Installation Guide](docs/user/installation.md) - Detailed prerequisites, configuration options, and installation steps
 - [Metrics Documentation](docs/user/metrics.md) - Available metrics and their descriptions
 
-### 🔧 Other Installation Methods
+### 🔧 Other Installation Methods (generic upstream references)
 
-Choose your preferred method:
+Choose your preferred method. The following examples are generic Kepler references and are not the primary production flow for this fork.
 
 ```bash
 # 💻 Local Development
@@ -111,7 +113,14 @@ kubectl kustomize manifests/k8s | \
 
 ## Production Deployment with External Power Input
 
-Kepler supports production deployments where node power input is sourced from an external Prometheus or VictoriaMetrics target, instead of relying solely on local RAPL-based node power readings. This is useful when you have a high-precision central power meter feeding device power metrics.
+This fork of Kepler is configured for production use with an external Prometheus/VictoriaMetrics power source and a custom image/chart path. Upstream generic examples are retained for reference, but the actual runtime setup for this repository is concrete and opinionated.
+
+In this deployment, POWER_DEVICE is resolved from `NODE_NAME` by default, and mapping via `nodeDeviceMapFile` is optional fallback.
+
+Kepler can run in two modes:
+
+- Direct mode (default): `POWER_DEVICE = NODE_NAME`
+- Optional mapping mode: `nodeDeviceMapFile` supplied to map node names to external device labels when they differ
 
 ### External Power Input Modes
 
@@ -136,13 +145,13 @@ query: device_power_watts_avg{room="R3.033",rack="Rack 3",device="${POWER_DEVICE
 
 ### Required Kubernetes Objects
 
-In this production pattern, ensure the following objects are present:
+In this production fork, ensure the following objects are present:
 
-- Registry Pull Secret for private image registry access.
-- CA Secret for TLS trust of the central monitoring VM endpoint.
-- Secret for Kepler external power query authentication.
-- Secret for vmagent `remote_write` authentication.
-- Optional ConfigMap for node-to-device mapping, only required if node names do not match external device labels.
+- `gitlab-registry-creds`: image pull secret for the private GitLab registry.
+- `vm-ca-cert`: CA secret for TLS trust of the central VictoriaMetrics endpoint.
+- `prompower-auth`: secret for Kepler external power query credentials.
+- `vm-remote-write-auth`: secret for `vmagent` remote_write credentials.
+- Optional `kepler-node-device-map`: ConfigMap for node-to-device mapping, only required if node names differ from external `device` labels.
 
 ### Example Node-to-Device ConfigMap (Optional Fallback Mode)
 
@@ -151,7 +160,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: kepler-node-device-map
-  namespace: kepler
+  namespace: default
 data:
   worker-node-01: kub01
   worker-node-02: kub02
@@ -161,36 +170,45 @@ data:
 ### Helm Values for Production
 
 ```yaml
+namespace:
+  create: false
+  name: default
+
+serviceAccount:
+  create: true
+  name: kepler
+
 image:
-  repository: quay.io/sustainable_computing_io/kepler
-  tag: v0.10.0
+  repository: gitlab.lrz.de:5005/green-it/students/bachelor/eder-moritz/kepler-prompower
+  tag: v0.1.2
+  pullPolicy: IfNotPresent
+imagePullSecrets:
+  - name: gitlab-registry-creds
 
 config:
   experimental:
     prometheus-power:
       enabled: true
-      baseURL: "https://central-vm.example.com"
-      username: "kepler-user"
-      passwordFile: "/etc/kepler/secrets/kepler-password"
-      caFile: "/etc/kepler/secrets/ca.crt"
-      # direct mode (default)
+      baseURL: "https://prometheus.cs.hm.edu:8428"
+      username: "vmuser"
+      passwordFile: "/etc/prompower-auth/password"
+      caFile: "/etc/prompower-ca/ca.crt"
       nodeDeviceMapFile: ""
       query: "device_power_watts_avg{room=\"R3.033\",rack=\"Rack 3\",device=\"${POWER_DEVICE}\"}"
-      # optional mapping mode
-      # nodeDeviceMapFile: "/etc/kepler/config/node-device-map.yaml"
 
 vmagent:
   enabled: true
   scrape:
-    target:
-      path: /metrics
-      scheme: https
+    interval: 5s
+    target: "127.0.0.1:28282"
+    path: /metrics
+    scheme: http
   remoteWrite:
-    url: "https://central-vm.example.com/api/v1/write"
-    username: "vmagent-user"
-    passwordSecretName: vmagent-remote-write-secret
+    url: "https://prometheus.cs.hm.edu:8428/api/v1/write"
+    username: "vmuser"
+    passwordSecretName: vm-remote-write-auth
     passwordSecretKey: password
-    caFile: "/etc/kepler/secrets/ca.crt"
+    caFile: "/etc/prompower-ca/ca.crt"
 ```
 
 ### Worker-Only Scheduling
@@ -199,35 +217,38 @@ For production, schedule Kepler only on worker nodes (not control-plane nodes) b
 
 ### Production Rollout Checklist
 
-- [x] image built and pushed to registry
-- [x] production values file selected and applied
+- [x] custom image built and pushed to GitLab registry (`gitlab.lrz.de:5005/green-it/students/bachelor/eder-moritz/kepler-prompower:v0.1.2`)
+- [x] deploy via Helm chart at `manifests/helm/kepler` with `manifests/helm/kepler/values-prompower-prod.yaml`
 - [x] monitoring endpoint reachable from cluster
-- [x] HTTPS and Basic Auth working for central endpoint
-- [x] secrets and ConfigMap present in namespace
+- [x] HTTPS and Basic Auth working for central VictoriaMetrics endpoint
+- [x] secrets and (optional) ConfigMap present in namespace
 - [x] production node names match external device labels OR optional node-to-device mapping is configured
 - [x] worker-only scheduling configured for DaemonSet
-- [x] vmagent `remote_write` forwarding verified
+- [x] vmagent `remote_write` forwarding verified and external power input query returns values
 
 ### Smoke Test After Rollout
 
-1. Verify DaemonSet and pods:
+1. Verify DaemonSet and pods (example assumes release name `kepler`):
 
 ```bash
-kubectl get daemonset kepler -n kepler
-kubectl get pods -n kepler
+kubectl get daemonset kepler -n default
+kubectl get pods -n default -l app.kubernetes.io/name=kepler
 ```
+
+If your release name is different, replace `kepler` with your release name.
 
 2. Port-forward a Kepler pod and test metrics endpoint:
 
 ```bash
-kubectl port-forward -n kepler svc/kepler 28282:28282
+kubectl port-forward -n default svc/kepler 28282:28282
 curl http://localhost:28282/metrics | grep kepler_node_cpu_watts
 ```
+
 
 3. Query central VictoriaMetrics for forwarded metrics:
 
 ```bash
-curl -G "https://central-vm.example.com/api/v1/query" --data-urlencode 'query=sum by (node_name)(kepler_node_cpu_watts)' --user "vmagent-user:yourpassword" --cacert /path/to/ca.crt
+curl -G "https://prometheus.cs.hm.edu:8428/api/v1/query" --data-urlencode 'query=sum by (node_name)(kepler_node_cpu_watts)' --user "vmuser:yourpassword" --cacert /etc/prompower-ca/ca.crt
 ```
 
 ### Notes for Cluster Migration
@@ -238,7 +259,7 @@ When migrating this setup to a different cluster you typically need to adjust:
 - central monitoring endpoint hostname
 - CA certificate secret
 - auth secrets
-- node-to-device mapping ConfigMap
+- optional node-to-device mapping ConfigMap (only if node names differ from external device labels)
 - scheduling constraints (node selectors/taints)
 - dashboards and queries with environment-specific labels
 
