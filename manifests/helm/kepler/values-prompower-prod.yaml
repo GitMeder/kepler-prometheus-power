@@ -1,0 +1,170 @@
+image:
+  repository: gitlab.lrz.de:5005/green-it/students/bachelor/eder-moritz/kepler-prompower
+  pullPolicy: IfNotPresent
+  tag: "v0.1.2"
+
+imagePullSecrets:
+  - name: gitlab-registry-creds
+
+namespace:
+  create: false
+  name: default
+
+serviceAccount:
+  create: true
+  name: kepler
+
+rbac:
+  create: true
+
+service:
+  type: ClusterIP
+  port: 28282
+  targetPort: http
+  protocol: TCP
+
+daemonset:
+  hostPID: true
+  tolerations:
+  nodeSelector: {}
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
+              - key: node-role.kubernetes.io/master
+                operator: DoesNotExist
+  hostUsers: true
+  securityContext:
+    privileged: true
+    runAsNonRoot: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+config:
+  log:
+    level: info
+    format: text
+  host:
+    sysfs: /host/sys
+    procfs: /host/proc
+  monitor:
+    interval: 5s
+    staleness: 30s
+    maxTerminated: 100
+    minTerminatedEnergyThreshold: 10
+  rapl:
+    zones: []
+  exporter:
+    stdout:
+      enabled: false
+    prometheus:
+      enabled: true
+      debugCollectors:
+        - go
+      metricsLevel:
+        - node
+        - process
+  web:
+    configFile: ""
+    listenAddresses:
+      - :28282
+  debug:
+    pprof:
+      enabled: false
+  kube:
+    enabled: false
+    config: ""
+    nodeName: ""
+    podInformer:
+      mode: kubelet
+      pollInterval: 15s
+  dev:
+    fake-cpu-meter:
+      enabled: false
+      zones: []
+  experimental:
+    prometheus-power:
+      nodeDeviceMapFile: ""
+      caFile: /etc/prompower-ca/ca.crt
+      enabled: true
+      baseURL: https://prometheus.cs.hm.edu:8428
+      username: vmuser
+      passwordFile: /etc/prompower-auth/password
+      query: device_power_watts_avg{room="R3.033",rack="Rack 3",device="${POWER_DEVICE}"}
+    platform:
+      redfish:
+        enabled: false
+        configFile: /etc/kepler/redfish.yaml
+        nodeName: ""
+    hwmon:
+      enabled: false
+      zones: []
+      chipRules: []
+    gpu:
+      enabled: false
+      idlePower: 0
+      dcgmEndpoint: ""
+
+serviceMonitor:
+  enabled: false
+
+networkPolicy:
+  enabled: false
+
+labels:
+  room: R3.033
+  rack: Rack-3
+
+annotations: {}
+
+vmagent:
+  enabled: true
+  image:
+    repository: victoriametrics/vmagent
+    tag: "v1.108.0"
+    pullPolicy: IfNotPresent
+
+  scrape:
+    interval: 5s
+    target: "127.0.0.1:28282"
+    path: /metrics
+    scheme: http
+
+  remoteWrite:
+    url: https://prometheus.cs.hm.edu:8428/api/v1/write
+    username: vmuser
+    passwordSecretName: vm-remote-write-auth
+    passwordSecretKey: password
+    caFile: /etc/prompower-ca/ca.crt
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+  readinessProbe:
+    tcpSocket:
+      port: 8429
+    initialDelaySeconds: 5
+    periodSeconds: 15
+
+  livenessProbe:
+    tcpSocket:
+      port: 8429
+    initialDelaySeconds: 10
+    periodSeconds: 30
+
+prompowerAuth:
+  secretName: prompower-auth
+  mountPath: /etc/prompower-auth
