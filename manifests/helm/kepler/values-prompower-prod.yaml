@@ -7,8 +7,8 @@ imagePullSecrets:
   - name: gitlab-registry-creds
 
 namespace:
-  create: false
-  name: default
+  create: true
+  name: kepler
 
 serviceAccount:
   create: true
