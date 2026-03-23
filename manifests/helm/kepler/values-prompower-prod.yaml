@@ -50,7 +50,7 @@ config:
     sysfs: /host/sys
     procfs: /host/proc
   monitor:
-    interval: 5s
+    interval: 30s
     staleness: 30s
     maxTerminated: 100
     minTerminatedEnergyThreshold: 10
@@ -127,7 +127,7 @@ vmagent:
     pullPolicy: IfNotPresent
 
   scrape:
-    interval: 5s
+    interval: 30s
     target: "127.0.0.1:28282"
     path: /metrics
     scheme: http
