@@ -6,6 +6,7 @@ package device
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -21,6 +22,7 @@ type PrometheusPowerZone struct {
 	index     int
 	path      string
 	readPower func(ctx context.Context) (float64, error)
+	logger    *slog.Logger
 }
 
 // Name returns the meter identifier.
@@ -61,16 +63,55 @@ func (z *PrometheusPowerZone) MaxEnergy() Energy { return 0 }
 
 // Power queries the external feed and converts the watt value to microwatts.
 func (z *PrometheusPowerZone) Power() (Power, error) {
+	started := time.Now()
+
+	if z.logger != nil {
+		z.logger.Info(
+			"Starting Prometheus power read",
+			"zone", z.name,
+			"path", z.path,
+		)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	watts, err := z.readPower(ctx)
+	duration := time.Since(started)
 	if err != nil {
-		return 0, err
+		if z.logger != nil {
+			z.logger.Error(
+				"Prometheus power read failed",
+				"zone", z.name,
+				"path", z.path,
+				"duration", duration,
+				"error", err,
+			)
+		}
+		return 0, fmt.Errorf("prometheus power read failed after %s: %w", duration, err)
 	}
 
 	if watts < 0 {
-		return 0, fmt.Errorf("received negative watt value %.2f from Prometheus", watts)
+		if z.logger != nil {
+			z.logger.Error(
+				"Prometheus power read returned negative watt value",
+				"zone", z.name,
+				"path", z.path,
+				"duration", duration,
+				"watts", watts,
+			)
+		}
+		return 0, fmt.Errorf("received negative watt value %.2f from Prometheus after %s", watts, duration)
+	}
+
+	if z.logger != nil {
+		z.logger.Info(
+			"Prometheus power read succeeded",
+			"zone", z.name,
+			"path", z.path,
+			"duration", duration,
+			"watts", watts,
+		)
 	}
 
 	return Power(watts * 1_000_000), nil
@@ -80,6 +121,7 @@ func (z *PrometheusPowerZone) Power() (Power, error) {
 func NewPrometheusPowerMeter(
 	zoneName string,
 	readPowerFunc func(ctx context.Context) (float64, error),
+	logger *slog.Logger,
 ) (CPUPowerMeter, error) {
 	if readPowerFunc == nil {
 		return nil, fmt.Errorf("readPowerFunc must not be nil")
@@ -90,12 +132,17 @@ func NewPrometheusPowerMeter(
 		name = "prometheus-node"
 	}
 
+	if logger != nil {
+		logger = logger.With("component", "prometheus-power-meter", "zone", name)
+	}
+
 	return &PrometheusPowerMeter{
 		zone: &PrometheusPowerZone{
 			name:      name,
 			index:     0,
 			path:      fmt.Sprintf("prometheus:%s", name),
 			readPower: readPowerFunc,
+			logger:    logger,
 		},
 	}, nil
 }

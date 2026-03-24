@@ -18,6 +18,11 @@ const nodeNameLabel = "node_name"
 
 type PowerDataProvider = monitor.PowerDataProvider
 
+const (
+	slowCollectThreshold = 10 * time.Second
+	slowPhaseThreshold   = 5 * time.Second
+)
+
 // PowerCollector combines Node, Process, and Container collectors to ensure data consistency
 // by fetching all data in a single atomic operation during collection
 type PowerCollector struct {
@@ -195,10 +200,8 @@ func (c *PowerCollector) Describe(ch chan<- *prometheus.Desc) {
 		ch <- c.nodeCPUJoulesDescriptor
 		ch <- c.nodeCPUWattsDescriptor
 		ch <- c.nodeCPUUsageRatioDescriptor
-		// node cpu active
 		ch <- c.nodeCPUActiveJoulesDesc
 		ch <- c.nodeCPUActiveWattsDesc
-		// node cpu idle
 		ch <- c.nodeCPUIdleJoulesDesc
 		ch <- c.nodeCPUIdleWattsDesc
 	}
@@ -218,7 +221,6 @@ func (c *PowerCollector) Describe(ch chan<- *prometheus.Desc) {
 		ch <- c.containerCPUWattsDescriptor
 		ch <- c.containerGPUJoulesDescriptor
 		ch <- c.containerGPUWattsDescriptor
-		// ch <- c.containerCPUTimeDescriptor // TODO: add conntainerCPUTimeDescriptor
 	}
 
 	// vm
@@ -261,49 +263,163 @@ func (c *PowerCollector) Collect(ch chan<- prometheus.Metric) {
 
 	started := time.Now()
 	c.logger.Info("Collecting unified power data")
+
 	defer func() {
-		c.logger.Info("Collected unified power data", "duration", time.Since(started))
+		duration := time.Since(started)
+		c.logger.Info("Collected unified power data", "duration", duration)
+
+		if duration > slowCollectThreshold {
+			c.logger.Warn("Power collection is slow", "duration", duration)
+		}
 	}()
 
-	snapshot, err := c.pm.Snapshot() // snapshot is thread-safe
+	snapshotStart := time.Now()
+	snapshot, err := c.pm.Snapshot()
+	snapshotDuration := time.Since(snapshotStart)
 	if err != nil {
-		c.logger.Error("Failed to collect power data", "error", err)
+		c.logger.Error("Failed to collect power data", "error", err, "snapshot_duration", snapshotDuration)
 		return
 	}
 
+	c.logger.Info("Snapshot collected", "duration", snapshotDuration)
+	if snapshotDuration > slowPhaseThreshold {
+		c.logger.Warn("Snapshot collection is slow", "duration", snapshotDuration)
+	}
+
+	c.logger.Info(
+		"Snapshot sizes",
+		"node_nil", snapshot.Node == nil,
+		"processes", len(snapshot.Processes),
+		"terminated_processes", len(snapshot.TerminatedProcesses),
+		"containers", len(snapshot.Containers),
+		"terminated_containers", len(snapshot.TerminatedContainers),
+		"vms", len(snapshot.VirtualMachines),
+		"terminated_vms", len(snapshot.TerminatedVirtualMachines),
+		"pods", len(snapshot.Pods),
+		"terminated_pods", len(snapshot.TerminatedPods),
+		"gpu_devices", len(snapshot.GPUStats),
+	)
+
 	if c.metricsLevel.IsNodeEnabled() {
-		c.collectNodeMetrics(ch, snapshot.Node)
+		nodeStart := time.Now()
+		if snapshot.Node == nil {
+			c.logger.Warn("Skipping node metrics because snapshot.Node is nil")
+		} else {
+			c.collectNodeMetrics(ch, snapshot.Node)
+		}
+		nodeDuration := time.Since(nodeStart)
+		c.logger.Info("Collected node metrics", "duration", nodeDuration)
+		if nodeDuration > slowPhaseThreshold {
+			c.logger.Warn("Node metric collection is slow", "duration", nodeDuration)
+		}
 	}
 
 	if c.metricsLevel.IsProcessEnabled() {
+		processStart := time.Now()
 		c.collectProcessMetrics(ch, "running", snapshot.Processes)
 		c.collectProcessMetrics(ch, "terminated", snapshot.TerminatedProcesses)
+		processDuration := time.Since(processStart)
+		c.logger.Info(
+			"Collected process metrics",
+			"duration", processDuration,
+			"running_processes", len(snapshot.Processes),
+			"terminated_processes", len(snapshot.TerminatedProcesses),
+		)
+		if processDuration > slowPhaseThreshold {
+			c.logger.Warn(
+				"Process metric collection is slow",
+				"duration", processDuration,
+				"running_processes", len(snapshot.Processes),
+				"terminated_processes", len(snapshot.TerminatedProcesses),
+			)
+		}
 	}
 
 	if c.metricsLevel.IsContainerEnabled() {
+		containerStart := time.Now()
 		c.collectContainerMetrics(ch, "running", snapshot.Containers)
 		c.collectContainerMetrics(ch, "terminated", snapshot.TerminatedContainers)
+		containerDuration := time.Since(containerStart)
+		c.logger.Info(
+			"Collected container metrics",
+			"duration", containerDuration,
+			"running_containers", len(snapshot.Containers),
+			"terminated_containers", len(snapshot.TerminatedContainers),
+		)
+		if containerDuration > slowPhaseThreshold {
+			c.logger.Warn(
+				"Container metric collection is slow",
+				"duration", containerDuration,
+				"running_containers", len(snapshot.Containers),
+				"terminated_containers", len(snapshot.TerminatedContainers),
+			)
+		}
 	}
 
 	if c.metricsLevel.IsVMEnabled() {
+		vmStart := time.Now()
 		c.collectVMMetrics(ch, "running", snapshot.VirtualMachines)
 		c.collectVMMetrics(ch, "terminated", snapshot.TerminatedVirtualMachines)
+		vmDuration := time.Since(vmStart)
+		c.logger.Info(
+			"Collected VM metrics",
+			"duration", vmDuration,
+			"running_vms", len(snapshot.VirtualMachines),
+			"terminated_vms", len(snapshot.TerminatedVirtualMachines),
+		)
+		if vmDuration > slowPhaseThreshold {
+			c.logger.Warn(
+				"VM metric collection is slow",
+				"duration", vmDuration,
+				"running_vms", len(snapshot.VirtualMachines),
+				"terminated_vms", len(snapshot.TerminatedVirtualMachines),
+			)
+		}
 	}
 
 	if c.metricsLevel.IsPodEnabled() {
+		podStart := time.Now()
 		c.collectPodMetrics(ch, "running", snapshot.Pods)
 		c.collectPodMetrics(ch, "terminated", snapshot.TerminatedPods)
+		podDuration := time.Since(podStart)
+		c.logger.Info(
+			"Collected pod metrics",
+			"duration", podDuration,
+			"running_pods", len(snapshot.Pods),
+			"terminated_pods", len(snapshot.TerminatedPods),
+		)
+		if podDuration > slowPhaseThreshold {
+			c.logger.Warn(
+				"Pod metric collection is slow",
+				"duration", podDuration,
+				"running_pods", len(snapshot.Pods),
+				"terminated_pods", len(snapshot.TerminatedPods),
+			)
+		}
 	}
 
-	// Collect GPU device stats (node-level)
 	if c.metricsLevel.IsNodeEnabled() {
+		gpuStart := time.Now()
 		c.collectGPUMetrics(ch, snapshot.GPUStats)
+		gpuDuration := time.Since(gpuStart)
+		c.logger.Info(
+			"Collected GPU metrics",
+			"duration", gpuDuration,
+			"gpu_devices", len(snapshot.GPUStats),
+		)
+		if gpuDuration > slowPhaseThreshold {
+			c.logger.Warn(
+				"GPU metric collection is slow",
+				"duration", gpuDuration,
+				"gpu_devices", len(snapshot.GPUStats),
+			)
+		}
 	}
 }
 
 // collectNodeMetrics collects node-level power metrics
 func (c *PowerCollector) collectNodeMetrics(ch chan<- prometheus.Metric, node *monitor.Node) {
-	c.mutex.RLock() // locking nodeJoulesDescriptors
+	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 
 	ch <- prometheus.MustNewConstMetric(
@@ -311,11 +427,11 @@ func (c *PowerCollector) collectNodeMetrics(ch chan<- prometheus.Metric, node *m
 		prometheus.GaugeValue,
 		node.UsageRatio,
 	)
+
 	for zone, energy := range node.Zones {
 		path := zone.Path()
 		zoneName := zone.Name()
 
-		// joules
 		ch <- prometheus.MustNewConstMetric(
 			c.nodeCPUJoulesDescriptor,
 			prometheus.CounterValue,
@@ -337,26 +453,26 @@ func (c *PowerCollector) collectNodeMetrics(ch chan<- prometheus.Metric, node *m
 			zoneName, path,
 		)
 
-		// watts
 		ch <- prometheus.MustNewConstMetric(
 			c.nodeCPUWattsDescriptor,
 			prometheus.GaugeValue,
 			energy.Power.Watts(),
 			zoneName, path,
 		)
+
 		ch <- prometheus.MustNewConstMetric(
 			c.nodeCPUActiveWattsDesc,
 			prometheus.GaugeValue,
 			energy.ActivePower.Watts(),
 			zoneName, path,
 		)
+
 		ch <- prometheus.MustNewConstMetric(
 			c.nodeCPUIdleWattsDesc,
 			prometheus.GaugeValue,
 			energy.IdlePower.Watts(),
 			zoneName, path,
 		)
-
 	}
 }
 
@@ -367,9 +483,7 @@ func (c *PowerCollector) collectProcessMetrics(ch chan<- prometheus.Metric, stat
 		return
 	}
 
-	// No need to lock, already done by the calling function
 	for pid, proc := range processes {
-
 		ch <- prometheus.MustNewConstMetric(
 			c.processCPUTimeDescriptor,
 			prometheus.CounterValue,
@@ -380,6 +494,7 @@ func (c *PowerCollector) collectProcessMetrics(ch chan<- prometheus.Metric, stat
 
 		for zone, usage := range proc.Zones {
 			zoneName := zone.Name()
+
 			ch <- prometheus.MustNewConstMetric(
 				c.processCPUJoulesDescriptor,
 				prometheus.CounterValue,
@@ -399,7 +514,6 @@ func (c *PowerCollector) collectProcessMetrics(ch chan<- prometheus.Metric, stat
 			)
 		}
 
-		// GPU power metric (only for processes actively using GPU)
 		if proc.GPUPower > 0 {
 			ch <- prometheus.MustNewConstMetric(
 				c.processGPUWattsDescriptor,
@@ -410,7 +524,6 @@ func (c *PowerCollector) collectProcessMetrics(ch chan<- prometheus.Metric, stat
 			)
 		}
 
-		// GPU energy metric (cumulative counter)
 		if proc.GPUEnergyTotal > 0 {
 			ch <- prometheus.MustNewConstMetric(
 				c.processGPUJoulesDescriptor,
@@ -430,7 +543,6 @@ func (c *PowerCollector) collectContainerMetrics(ch chan<- prometheus.Metric, st
 		return
 	}
 
-	// No need to lock, already done by the calling function
 	for id, container := range containers {
 		for zone, usage := range container.Zones {
 			zoneName := zone.Name()
@@ -454,7 +566,6 @@ func (c *PowerCollector) collectContainerMetrics(ch chan<- prometheus.Metric, st
 			)
 		}
 
-		// GPU power metric (only for containers with GPU-using processes)
 		if container.GPUPower > 0 {
 			ch <- prometheus.MustNewConstMetric(
 				c.containerGPUWattsDescriptor,
@@ -465,7 +576,6 @@ func (c *PowerCollector) collectContainerMetrics(ch chan<- prometheus.Metric, st
 			)
 		}
 
-		// GPU energy metric (cumulative counter)
 		if container.GPUEnergyTotal > 0 {
 			ch <- prometheus.MustNewConstMetric(
 				c.containerGPUJoulesDescriptor,
@@ -485,10 +595,10 @@ func (c *PowerCollector) collectVMMetrics(ch chan<- prometheus.Metric, state str
 		return
 	}
 
-	// No need to lock, already done by the calling function
 	for id, vm := range vms {
 		for zone, usage := range vm.Zones {
 			zoneName := zone.Name()
+
 			ch <- prometheus.MustNewConstMetric(
 				c.vmCPUJoulesDescriptor,
 				prometheus.CounterValue,
@@ -514,10 +624,10 @@ func (c *PowerCollector) collectPodMetrics(ch chan<- prometheus.Metric, state st
 		return
 	}
 
-	// No need to lock, already done by the calling function
 	for id, pod := range pods {
 		for zone, usage := range pod.Zones {
 			zoneName := zone.Name()
+
 			ch <- prometheus.MustNewConstMetric(
 				c.podCPUJoulesDescriptor,
 				prometheus.CounterValue,
@@ -535,7 +645,6 @@ func (c *PowerCollector) collectPodMetrics(ch chan<- prometheus.Metric, state st
 			)
 		}
 
-		// GPU power metric (only for pods with GPU-using containers)
 		if pod.GPUPower > 0 {
 			ch <- prometheus.MustNewConstMetric(
 				c.podGPUWattsDescriptor,
@@ -545,7 +654,6 @@ func (c *PowerCollector) collectPodMetrics(ch chan<- prometheus.Metric, state st
 			)
 		}
 
-		// GPU energy metric (cumulative counter)
 		if pod.GPUEnergyTotal > 0 {
 			ch <- prometheus.MustNewConstMetric(
 				c.podGPUJoulesDescriptor,
@@ -563,6 +671,7 @@ func (c *PowerCollector) collectGPUMetrics(ch chan<- prometheus.Metric, gpuStats
 		c.logger.Debug("No GPU stats to export")
 		return
 	}
+
 	c.logger.Debug("Exporting GPU metrics", "devices", len(gpuStats))
 
 	for _, stats := range gpuStats {

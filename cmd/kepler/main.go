@@ -358,11 +358,12 @@ func createCPUMeter(logger *slog.Logger, cfg *config.Config) (device.CPUPowerMet
 		username := strings.TrimSpace(pp.Username)
 		passwordFile := strings.TrimSpace(pp.PasswordFile)
 
-		client, err := device.NewPrometheusClient(baseURL, query, caFile, username, passwordFile)
+		powerQueryLogger := logger.With("feature", "prometheus-power")
+		client, err := device.NewPrometheusClient(baseURL, query, caFile, username, passwordFile, powerQueryLogger)
 		if err != nil {
 			return nil, err
 		}
-		return device.NewPrometheusPowerMeter("node", client.QueryPowerWatt)
+		return device.NewPrometheusPowerMeter("node", client.QueryPowerWatt, powerQueryLogger)
 	}
 
 	if fake := cfg.Dev.FakeCpuMeter; *fake.Enabled {
